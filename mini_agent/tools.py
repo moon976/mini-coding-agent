@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
-from .config import COMMAND_BLACKLIST, WORKSPACE_DIR, ensure_workspace
+from .config import COMMAND_BLACKLIST, DANGEROUS_PATTERNS, WORKSPACE_DIR, ensure_workspace
 
 # 工具输出的最大字符数。模型上下文有限，超长输出会把对话撑爆。
 MAX_OUTPUT_CHARS = 8000
@@ -187,16 +188,67 @@ def _subprocess_env() -> dict:
     return env
 
 
+# 确认钩子：由命令行层注入。默认行为是在终端里问一句。
+# 做成可注入的回调而不是写死 input()，是为了让这段逻辑可以被单独测试 ——
+# 测试时传一个固定返回 True/False 的函数就行，不用真的去按键盘。
+_confirm_hook = None
+
+
+def set_confirm_hook(fn) -> None:
+    """注入确认函数。签名：fn(command: str, reason: str) -> bool"""
+    global _confirm_hook
+    _confirm_hook = fn
+
+
+def _default_confirm(command: str, reason: str) -> bool:
+    """默认的确认方式：在终端问一句，等人回答。
+
+    拿不到回答时（非交互环境、Ctrl+C）一律当作「不执行」。
+    安全相关的默认值必须选保守的那个：问不清就别动。
+    """
+    print(f"\n  ⚠️  这条命令需要确认：{reason}")
+    print(f"      {command}")
+    try:
+        ans = input("      确定执行吗？[y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("      没有收到回答，按「不执行」处理。")
+        return False
+    return ans in ("y", "yes")
+
+
+def _danger_reason(command: str) -> str | None:
+    """检查命令是否属于高危操作。返回原因，安全则返回 None。"""
+    for pattern, reason in DANGEROUS_PATTERNS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return reason
+    return None
+
+
 def tool_run_command(command: str, timeout: int = 30) -> str:
     """在工作目录里执行一条 shell 命令，返回 stdout、stderr 和退出码。
 
     为什么必须返回退出码？因为很多命令「有输出但其实是失败的」，
     模型只有看到退出码才能判断要不要重试。
+
+    三道安全闸门，从上到下依次收紧：
+      1. 黑名单：直接拒绝，连问都不问（针对毁灭性操作）
+      2. 高危：停下来问人，人点头才执行
+      3. 沙盒：命令的工作目录固定在 workspace/ 内
     """
     low = command.strip().lower()
     for bad in COMMAND_BLACKLIST:
         if bad in low:
             return f"错误：命令被安全策略拒绝（包含危险片段：{bad}）"
+
+    reason = _danger_reason(command)
+    if reason:
+        hook = _confirm_hook or _default_confirm
+        if not hook(command, reason):
+            return (
+                f"已取消执行：这条命令会【{reason}】，人没有确认。\n"
+                f"请换一个更安全的方式达成目的，不要原样重试这条命令。"
+            )
+
     ensure_workspace()
     try:
         proc = subprocess.run(

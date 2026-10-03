@@ -13,6 +13,7 @@ import sys
 from .agent import Agent
 from .config import load_settings
 from .llm import MockClient, OpenAICompatClient
+from .tools import set_confirm_hook
 
 
 def build_client(use_mock: bool, script: str = "fix"):
@@ -70,7 +71,24 @@ def main() -> None:
     )
     parser.add_argument("--max-steps", type=int, default=20, help="最大循环步数，默认 20")
     parser.add_argument("--quiet", action="store_true", help="不打印中间过程")
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="高危命令不再询问，直接执行。只在无人值守时用，默认关闭",
+    )
     args = parser.parse_args()
+
+    if args.yes:
+        # 自动放行，但每一条都打印出来。绝不能静默通过 —— 否则事后
+        # 你根本不知道 agent 到底删了什么。留痕比拦截更容易被忽略，但同样重要。
+        print("[警告] 已开启 --yes：高危命令将不再询问直接执行。")
+
+        def _auto(cmd: str, reason: str) -> bool:
+            print(f"  [自动放行] {reason} → {cmd}")
+            return True
+
+        set_confirm_hook(_auto)
 
     client = build_client(args.mock, args.script)
     agent = Agent(client, max_steps=args.max_steps, verbose=not args.quiet)

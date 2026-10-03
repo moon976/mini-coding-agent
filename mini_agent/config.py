@@ -18,8 +18,28 @@ WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
 #   中文大约 1 字 ≈ 1 token，英文 1 token ≈ 4 字符，这个数设得保守一点就够。
 MAX_CONTEXT_CHARS = 20000
 
-# 危险命令黑名单：命中就直接拒绝执行（很粗糙，但聊胜于无）
+# 第一层：绝对黑名单。命中直接拒绝，连问都不问。
 COMMAND_BLACKLIST = ("rm -rf /", "format c:", "shutdown", "del /f /s /q c:")
+
+# 第二层：高危命令。不直接拒绝，但执行前必须让人按一次 y。
+#
+# 这里的取舍是「宁可误报，不可漏报」：
+#   漏报的代价 = 文件没了，找不回来；
+#   误报的代价 = 用户按一下 y，几秒钟的事。
+# 所以宁可让它多问一次，也不能放过一个真危险的。
+#
+# 反过来，为什么不干脆全禁掉？因为删文件、回滚 git 本来就是 agent 的正经活，
+# 一刀切禁掉它就没法干活了。真正的做法是「让它干，但人得看着」。
+DANGEROUS_PATTERNS = (
+    (r"\brm\s", "删除文件/目录，不可恢复"),
+    (r"\brmdir\b", "删除目录"),
+    (r"\bdel\s", "删除文件"),
+    (r"\bmkfs\b", "格式化磁盘"),
+    (r"git\s+reset\s+--hard", "丢弃本地所有未提交的改动"),
+    (r"git\s+clean\b", "删除未跟踪的文件"),
+    (r"git\s+push\s+[^\n]*(-f\b|--force)", "强制推送，可能覆盖远程历史"),
+    (r">\s*[/\\]?[^>&|\s]+\.(py|json|md|txt|env|yml|yaml)\b", "重定向覆盖文件，原内容会丢失"),
+)
 
 
 def ensure_workspace() -> str:
