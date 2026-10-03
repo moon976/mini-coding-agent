@@ -54,10 +54,22 @@ class Agent:
         """
         total = self.history.size() if self.history else 0
         compactions = self.history.compactions if self.history else 0
-        return (
+        line = (
             f"[统计] 对话历史：{total} 字符 / 预算 {MAX_CONTEXT_CHARS}"
             f"，压缩过 {compactions} 次"
         )
+        usage = getattr(self.client, "usage", None)
+        if usage and usage.get("requests"):
+            extra = f"，共 {usage['requests']} 次请求"
+            if usage.get("retries"):
+                extra += f"（含 {usage['retries']} 次重试）"
+            if usage.get("total"):
+                extra += (
+                    f"，消耗 token：输入 {usage['prompt']} / 输出 {usage['completion']}"
+                    f" / 合计 {usage['total']}"
+                )
+            line += extra
+        return line
 
     def run(self, task: str) -> str:
         """执行一个任务，返回模型的最终答复。"""

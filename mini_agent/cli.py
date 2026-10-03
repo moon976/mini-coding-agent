@@ -31,6 +31,17 @@ def build_client(use_mock: bool, script: str = "fix"):
     if not s["model"]:
         print("没有读到模型名，请在 .env 里设置 LLM_MODEL。", file=sys.stderr)
         sys.exit(1)
+    if "*" in s["api_key"] or len(s["api_key"]) < 20:
+        # 这是一个真实踩过的坑：厂商后台列表里显示的是 sk-4444****99u8 这种打码版，
+        # 复制它填进 .env，程序不报错，只会在真正请求时来一句含糊的 401。
+        # 在这里直接拦下来，省得对着 401 猜半天。
+        print(
+            f"这个 key 看着不对（长度 {len(s['api_key'])}，含打码字符）。\n"
+            "注意：key 只在【创建成功的那一刻】完整显示一次，之后后台列表里看到的\n"
+            "sk-4444****99u8 是打码版，不能用来请求。请去后台新建一条 key 并完整复制。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print(f"[模式] 真实模型：{s['model']}  @ {s['base_url'] or '默认地址'}  (temperature={s['temperature']})")
     return OpenAICompatClient(
