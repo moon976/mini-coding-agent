@@ -1,0 +1,17 @@
+# 敏感信息：API key 绝不能进仓库
+.env
+
+# agent 的工作沙盒：它生成的东西不算项目代码。
+# 但 hello.py 是演示用的初始素材，保留在仓库里，方便 clone 下来直接跑。
+# 演示完想恢复原状：git checkout workspace/hello.py
+workspace/*
+!workspace/hello.py
+
+# Python / 编辑器产物
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+*.egg-info/

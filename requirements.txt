@@ -1,0 +1,2 @@
+openai>=1.40.0
+# .env 由 config.py 自己解析，不再需要 python-dotenv
