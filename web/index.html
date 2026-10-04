@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mini coding agent</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <strong>mini coding agent</strong>
+    <span class="sub">自己写的循环 · 工具 · 上下文管理</span>
+  </div>
+  <div class="controls">
+    <label class="field">
+      <span>模型</span>
+      <select id="mode-select">
+        <option value="real">真实模型（需要 key）</option>
+        <option value="mock">假模型（不用 key，走剧本）</option>
+      </select>
+    </label>
+    <label class="field" id="script-field" hidden>
+      <span>剧本</span>
+      <select id="script-select">
+        <option value="fix">fix 正常完成</option>
+        <option value="retry">retry 失败后重试</option>
+        <option value="loop">loop 一直打转</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>最多步数</span>
+      <input id="max-steps" type="number" value="20" min="1" max="100">
+    </label>
+    <div class="status"><span id="status-dot" class="dot idle"></span><span id="status-text">空闲</span></div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- 左：文件树 -->
+  <aside class="sidebar">
+    <div class="panel-head">
+      <span>workspace</span>
+      <button id="refresh-tree" class="mini-btn" title="刷新">刷新</button>
+    </div>
+    <div id="file-tree" class="tree"></div>
+  </aside>
+
+  <!-- 中：对话 -->
+  <section class="chat">
+    <div id="messages" class="messages">
+      <div class="empty-hint">
+        在下面输入一个编程任务试试，比如：<br>
+        <code>给 hello.py 的 add 函数写单元测试，运行它，失败就找出原因</code>
+      </div>
+    </div>
+
+    <div id="confirm-box" class="confirm-box" hidden>
+      <div class="confirm-title">⚠️ 这条命令需要你确认</div>
+      <div class="confirm-reason" id="confirm-reason"></div>
+      <pre class="confirm-cmd" id="confirm-cmd"></pre>
+      <div class="confirm-actions">
+        <button id="confirm-yes" class="btn danger">允许执行</button>
+        <button id="confirm-no" class="btn ghost">拒绝</button>
+      </div>
+      <div class="confirm-note">不回答视为拒绝。agent 会自己换一种方式继续。</div>
+    </div>
+
+    <form id="input-form" class="input-area">
+      <textarea id="task-input" rows="2" placeholder="输入任务，Ctrl+Enter 发送"></textarea>
+      <div class="input-actions">
+        <button id="send-btn" type="submit" class="btn primary">发送</button>
+        <button id="stop-btn" type="button" class="btn ghost" disabled>停止</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 右：文件预览 -->
+  <aside class="preview">
+    <div class="panel-head"><span id="preview-name">文件预览</span></div>
+    <pre id="preview-body" class="preview-body">点左边的文件看内容。
+agent 每次改完文件，这里会自动刷新。</pre>
+  </aside>
+
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
