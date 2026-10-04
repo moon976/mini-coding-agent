@@ -30,6 +30,16 @@ let busy = false;
 let autoScroll = true;
 let currentPreviewPath = null;
 
+// 「当前任务」的容器：运行中所有过程卡片都装进它；
+// 任务正常结束后，把过程整体折叠，只留最终回答在外面。
+let currentTask = null;
+let taskSteps = 0;
+
+// 运行中追加到任务容器，空闲时追加到消息区根部
+function target() {
+  return currentTask || els.messages;
+}
+
 // ---------------------------------------------------------------- 工具函数
 
 function escapeHtml(s) {
@@ -84,7 +94,7 @@ function addBlock(cls, html) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + cls;
   wrap.innerHTML = html;
-  els.messages.appendChild(wrap);
+  target().appendChild(wrap);
   scrollDown();
   return wrap;
 }
@@ -95,7 +105,7 @@ function addUserMsg(text) {
   wrap.className = 'msg user';
   wrap.innerHTML =
     '<div class="msg-role">你</div><div class="msg-body">' + escapeHtml(text) + '</div>';
-  els.messages.appendChild(wrap);
+  els.messages.appendChild(wrap);  // 用户消息永远留在根部，不进折叠区
   scrollDown(true);
 }
 
@@ -104,7 +114,7 @@ function addStep(n) {
   const d = document.createElement('div');
   d.className = 'step-line';
   d.textContent = '第 ' + n + ' 步';
-  els.messages.appendChild(d);
+  target().appendChild(d);
   scrollDown();
 }
 
@@ -112,7 +122,7 @@ function addStats(text) {
   const d = document.createElement('div');
   d.className = 'stats';
   d.textContent = text;
-  els.messages.appendChild(d);
+  target().appendChild(d);
   scrollDown();
 }
 
@@ -120,8 +130,42 @@ function addNotice(text) {
   const d = document.createElement('div');
   d.className = 'stats';
   d.textContent = text;
-  els.messages.appendChild(d);
+  target().appendChild(d);
   scrollDown();
+}
+
+// ---------------------------------------------------------------- 思考过程折叠
+
+// 任务结束时调用：把除最终回答外的所有过程装进 <details>，默认收起。
+// 为什么折叠而不是删掉？过程是「它是怎么想的」的证据，面试演示时
+// 点开就能讲；删了就再也找不回来了。
+function collapseTask() {
+  if (!currentTask) return;
+  const kids = Array.from(currentTask.children);
+  let lastAgent = null;
+  for (let i = kids.length - 1; i >= 0; i--) {
+    if (kids[i].classList.contains('msg') && kids[i].classList.contains('agent')) {
+      lastAgent = kids[i];
+      break;
+    }
+  }
+  if (lastAgent && kids.length > 1) {
+    const details = document.createElement('details');
+    details.className = 'thinking';
+    const sum = document.createElement('summary');
+    sum.textContent = '思考过程（' + taskSteps + ' 步 · 点击展开）';
+    details.appendChild(sum);
+    kids.forEach((el) => {
+      if (el !== lastAgent) details.appendChild(el);
+    });
+    currentTask.insertBefore(details, lastAgent);
+  }
+  currentTask = null;
+}
+
+// 放弃折叠：出错/手动停止时保持展开 —— 这些情况用户正需要看细节。
+function abortTask() {
+  currentTask = null;
 }
 
 // ---------------------------------------------------------------- 工具卡片
@@ -153,7 +197,7 @@ function addToolCard(id, name, args) {
   card.querySelector('.tool-head').addEventListener('click', () => {
     card.classList.toggle('collapsed');
   });
-  els.messages.appendChild(card);
+  target().appendChild(card);
   scrollDown();
   pendingTools[id] = card;
   return card;
@@ -250,9 +294,18 @@ function handleEvent(ev) {
     case 'mode':
       addNotice('本次使用：' + ev.mode);
       break;
-    case 'start':
+    case 'start': {
+      // 为这个任务开一个专属容器：之后的步骤、工具卡片都装进它，
+      // 结束时好整体折叠
+      const box = document.createElement('div');
+      box.className = 'task-box';
+      els.messages.appendChild(box);
+      currentTask = box;
+      taskSteps = 0;
       break;
+    }
     case 'step':
+      taskSteps = ev.step;
       addStep(ev.step);
       break;
     case 'compact':
@@ -274,20 +327,24 @@ function handleEvent(ev) {
       addNotice(ev.message);
       break;
     case 'error':
+      abortTask();   // 出错保持展开，方便看细节
       addBlock('error', '<div class="msg-role">出错</div><div class="msg-body">' + escapeHtml(ev.message) + '</div>');
       setStatus('err', '出错');
       break;
     case 'done':
+      collapseTask();   // 正常结束：过程收起，只留最终回答
       addStats(ev.stats);
       setStatus('ok', '完成');
       finishRun();
       break;
     case 'max_steps':
+      abortTask();      // 异常结束：保持展开，看是哪一步卡住的
       addStats(ev.stats + '｜' + ev.summary);
       setStatus('err', '达到步数上限');
       finishRun();
       break;
     case 'stopped':
+      abortTask();
       addStats(ev.stats + '｜' + ev.summary);
       setStatus('idle', '已停止');
       finishRun();

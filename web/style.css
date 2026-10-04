@@ -198,6 +198,32 @@ body {
   padding: 7px 11px; background: #f1f3f7; border-radius: 7px;
 }
 
+/* 一个任务的容器：运行中装过程，结束后整体折叠 */
+.task-box { margin: 0; }
+
+/* 折叠的思考过程：默认收起，点 summary 展开 */
+details.thinking {
+  margin: 10px 0;
+  border: 1px dashed #cfd6df;
+  border-radius: var(--radius);
+  background: #fafbfc;
+  overflow: hidden;
+}
+details.thinking summary {
+  cursor: pointer;
+  padding: 8px 13px;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+  list-style: none;
+}
+details.thinking summary::-webkit-details-marker { display: none; }
+details.thinking summary::before { content: "▸ "; }
+details.thinking[open] summary::before { content: "▾ "; }
+details.thinking summary:hover { color: var(--primary); }
+details.thinking > *:not(summary) { margin-left: 8px; margin-right: 8px; }
+details.thinking > .msg:last-child { margin-bottom: 0; }
+
 /* ---------------- 输入区 ---------------- */
 
 .input-area {
