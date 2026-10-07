@@ -43,6 +43,10 @@ let currentTaskLive = null;
 // 等 start 建好任务容器再放进去 —— 它属于这个任务的过程信息，
 // 不该孤零零漂在当前任务外面。
 let pendingMode = null;
+// 同理：start 之前到的 notice 也要暂存。否则它会插在「用户提问」和「任务容器」之间，
+// 把两者隔开 —— 任务结束时按 previousElementSibling 找锚点就会找到这条提示，
+// 视线被拉到它那儿，用户的问题反而被顶出屏幕（实测踩到过）。
+let pendingNotices = [];
 
 // 运行中追加到任务容器，空闲时追加到消息区根部
 function target() {
@@ -127,20 +131,33 @@ function addStep(n) {
   scrollDown();
 }
 
-function addStats(text) {
+// scroll 传 false = 只放进去，不许碰滚动位置。
+// 为什么需要这个开关：任务刚结束时我们会把视线拉回「用户的问题」，
+// 那之后再来任何一次 scrollDown 都会把画面重新拽到底部 —— 用户就又看不到
+// 自己问的是什么了（这个 bug 出过两回，第二次是我加 trace 提示时踩的）。
+function addStats(text, scroll) {
   const d = document.createElement('div');
   d.className = 'stats';
   d.textContent = text;
   target().appendChild(d);
-  scrollDown();
+  if (scroll !== false) scrollDown();
 }
 
-function addNotice(text) {
+function addNotice(text, scroll) {
   const d = document.createElement('div');
   d.className = 'stats';
   d.textContent = text;
   target().appendChild(d);
-  scrollDown();
+  if (scroll !== false) scrollDown();
+}
+
+// 把一句话并进上一行灰色小字，而不是新起一行 —— 不新增元素就不会触发重排和滚动
+function appendToLastStats(text) {
+  const all = els.messages.querySelectorAll('.stats');
+  if (!all || !all.length) return false;
+  const last = all[all.length - 1];
+  last.textContent = last.textContent + '　·　' + text;
+  return true;
 }
 
 // ---------------------------------------------------------------- 统计报告
@@ -240,8 +257,18 @@ function collapseTask() {
 // 任务跑完后把视线拉回「我问了什么」那一处。
 // 不改的话会很难解释：运行时页面一路向下追，等跑完只剩一个孤零零的答案，
 // 用户根本不知道这是在回答自己的哪个问题。
+//
+// 注意锚点必须「往上找到最近一条用户消息」，不能图省事取 previousElementSibling：
+// 任务容器前面只要夹了任何一个别的元素（一条提示、一块报告面板），
+// 紧邻的那个就不是用户提问，滚过去等于白滚 —— 用户的问题依旧在屏幕外。
 function scrollBackToQuestion(box) {
-  const anchor = box.previousElementSibling || box;  // 紧挨着 task-box 的通常就是用户提问
+  let anchor = box.previousElementSibling;
+  while (anchor && !(anchor.classList &&
+                     anchor.classList.contains('msg') &&
+                     anchor.classList.contains('user'))) {
+    anchor = anchor.previousElementSibling;
+  }
+  if (!anchor) anchor = box.previousElementSibling || box;
   if (anchor && typeof anchor.scrollIntoView === 'function') {
     anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -414,6 +441,9 @@ function handleEvent(ev) {
         addNotice('本次使用：' + pendingMode);
         pendingMode = null;
       }
+      // 之前暂存的提示现在补进容器里，保证「用户提问」紧贴着「任务容器」
+      pendingNotices.forEach((m) => addNotice(m));
+      pendingNotices = [];
       const live = document.createElement('div');
       live.className = 'thinking-live';
       box.appendChild(live);
@@ -442,10 +472,15 @@ function handleEvent(ev) {
       showConfirm(ev.command, ev.reason);
       break;
     case 'notice':
-      addNotice(ev.message);
+      // 任务还没开始（容器还没建）就先存着，别插在用户提问和任务容器中间
+      if (currentTask) addNotice(ev.message);
+      else pendingNotices.push(ev.message);
       break;
     case 'trace':
-      addNotice('已存入 traces/' + ev.path + '（可点「统计报告」汇总）');
+      // 任务已经结束了：这句提示绝不许抢滚动，否则刚拉回问题的视线又被拽到底部
+      if (!appendToLastStats('已存入 traces/' + ev.path)) {
+        addNotice('已存入 traces/' + ev.path, false);
+      }
       break;
     case 'error':
       abortTask();   // 出错保持展开，方便看细节
@@ -453,8 +488,8 @@ function handleEvent(ev) {
       setStatus('err', '出错');
       break;
     case 'done':
-      collapseTask();   // 正常结束：过程收起，只留最终回答
-      addStats(ev.stats);
+      collapseTask();   // 正常结束：过程收起，只留最终回答（并把视线拉回问题处）
+      addStats(ev.stats, false);   // 不能再滚，否则回滚白做
       setStatus('ok', '完成');
       finishRun();
       break;
