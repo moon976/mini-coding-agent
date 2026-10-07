@@ -34,6 +34,13 @@ let currentPreviewPath = null;
 // 任务正常结束后，把过程整体折叠，只留最终回答在外面。
 let currentTask = null;
 let taskSteps = 0;
+// 运行中顶部的「正在思考…」状态条。结束时移除 —— 它只服务于运行时，
+// 结束后由「思考过程（N 步）」那一行接替它的位置，不要留两个。
+let currentTaskLive = null;
+// 「本次用的是哪个模型」由后端在 start 之前就发过来，先存着，
+// 等 start 建好任务容器再放进去 —— 它属于这个任务的过程信息，
+// 不该孤零零漂在当前任务外面。
+let pendingMode = null;
 
 // 运行中追加到任务容器，空闲时追加到消息区根部
 function target() {
@@ -140,8 +147,10 @@ function addNotice(text) {
 // 为什么折叠而不是删掉？过程是「它是怎么想的」的证据，面试演示时
 // 点开就能讲；删了就再也找不回来了。
 function collapseTask() {
+  dropLive();
   if (!currentTask) return;
-  const kids = Array.from(currentTask.children);
+  const box = currentTask;
+  const kids = Array.from(box.children);
   let lastAgent = null;
   for (let i = kids.length - 1; i >= 0; i--) {
     if (kids[i].classList.contains('msg') && kids[i].classList.contains('agent')) {
@@ -158,14 +167,41 @@ function collapseTask() {
     kids.forEach((el) => {
       if (el !== lastAgent) details.appendChild(el);
     });
-    currentTask.insertBefore(details, lastAgent);
+    box.insertBefore(details, lastAgent);
   }
   currentTask = null;
+  scrollBackToQuestion(box);
+}
+
+// 任务跑完后把视线拉回「我问了什么」那一处。
+// 不改的话会很难解释：运行时页面一路向下追，等跑完只剩一个孤零零的答案，
+// 用户根本不知道这是在回答自己的哪个问题。
+function scrollBackToQuestion(box) {
+  const anchor = box.previousElementSibling || box;  // 紧挨着 task-box 的通常就是用户提问
+  if (anchor && typeof anchor.scrollIntoView === 'function') {
+    anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+// 移除「正在思考…」状态条
+function dropLive() {
+  if (currentTaskLive) {
+    currentTaskLive.remove();
+    currentTaskLive = null;
+  }
 }
 
 // 放弃折叠：出错/手动停止时保持展开 —— 这些情况用户正需要看细节。
 function abortTask() {
+  dropLive();
   currentTask = null;
+}
+
+// 运行中更新状态条：让人知道它没卡死，并且知道走到第几步了。
+function setLive(text) {
+  if (!currentTaskLive) return;
+  currentTaskLive.innerHTML =
+    '<span class="spin"></span><span>' + escapeHtml(text) + '</span>';
 }
 
 // ---------------------------------------------------------------- 工具卡片
@@ -183,12 +219,15 @@ function addToolCard(id, name, args) {
   } catch (_e) { /* 不是合法 JSON 就原样显示 */ }
 
   const card = document.createElement('div');
-  card.className = 'tool';
+  // 默认折叠：运行时屏幕应该显示「它在做什么」的一行行动作，
+  // 而不是铺满大段参数与返回值。细节留给需要时才点开。
+  card.className = 'tool collapsed';
   card.innerHTML =
     '<div class="tool-head">' +
-      '<span class="tool-arrow">▼</span>' +
+      '<span class="tool-arrow">▶</span>' +
       '<span class="tool-name">' + escapeHtml(name) + '</span>' +
       '<span class="tool-badge">' + escapeHtml(String(label).slice(0, 90)) + '</span>' +
+      '<span class="tool-state pending">…</span>' +
     '</div>' +
     '<div class="tool-body">' +
       '<div class="tool-label">参数</div><pre>' + escapeHtml(args) + '</pre>' +
@@ -208,11 +247,16 @@ function fillToolResult(id, result) {
   if (!card) return;
   const pre = card.querySelector('.tool-result');
   if (pre) pre.textContent = result || '(空)';
-  const badge = card.querySelector('.tool-badge');
   const failed = /^(错误|已取消)/.test(String(result || '')) || /\[退出码 [^0]\]/.test(String(result || ''));
-  if (badge && failed) {
-    badge.textContent = '失败 · ' + badge.textContent;
-    badge.classList.add('deny');
+  // 折叠状态下也要一眼看出成功与否，所以把结果做成一个 ✓ / ✗ 小标记
+  const state = card.querySelector('.tool-state');
+  if (state) {
+    state.textContent = failed ? '✗' : '✓';
+    state.className = 'tool-state ' + (failed ? 'bad' : 'ok');
+  }
+  if (failed) {
+    const badge = card.querySelector('.tool-badge');
+    if (badge) badge.classList.add('deny');
   }
   delete pendingTools[id];
   scrollDown();
@@ -292,7 +336,7 @@ async function refreshPreview() {
 function handleEvent(ev) {
   switch (ev.type) {
     case 'mode':
-      addNotice('本次使用：' + ev.mode);
+      pendingMode = ev.mode;
       break;
     case 'start': {
       // 为这个任务开一个专属容器：之后的步骤、工具卡片都装进它，
@@ -302,10 +346,20 @@ function handleEvent(ev) {
       els.messages.appendChild(box);
       currentTask = box;
       taskSteps = 0;
+      if (pendingMode) {
+        addNotice('本次使用：' + pendingMode);
+        pendingMode = null;
+      }
+      const live = document.createElement('div');
+      live.className = 'thinking-live';
+      box.appendChild(live);
+      currentTaskLive = live;
+      setLive('正在思考…');
       break;
     }
     case 'step':
       taskSteps = ev.step;
+      setLive('正在思考… 第 ' + ev.step + ' 步');
       addStep(ev.step);
       break;
     case 'compact':

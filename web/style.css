@@ -1,11 +1,11 @@
 :root {
-  --bg: #f6f7f9;
+  --bg: #f3f5f8;
   --panel: #ffffff;
-  --border: #e4e7ec;
-  --text: #1f2328;
-  --muted: #6b7280;
+  --border: #dfe3e9;
+  --text: #15191f;
+  --muted: #5c6675;
   --primary: #2563eb;
-  --primary-soft: #eff4ff;
+  --primary-soft: #eaf1ff;
   --danger: #dc2626;
   --code-bg: #1f2937;
   --code-text: #e5e7eb;
@@ -22,7 +22,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -113,7 +113,7 @@ body {
 
 .chat { display: flex; flex-direction: column; min-height: 0; }
 
-.messages { flex: 1; overflow: auto; padding: 18px 22px; }
+.messages { flex: 1; overflow: auto; padding: 20px 24px; }
 
 .empty-hint {
   color: var(--muted); text-align: center; margin-top: 40px; line-height: 2;
@@ -122,21 +122,49 @@ body {
   background: #eef1f5; padding: 3px 8px; border-radius: 5px; font-size: 12px;
 }
 
-.msg { margin-bottom: 14px; }
+/* ---------------- 对话气泡 ----------------
+   左右分栏不是为了好看，是为了「一眼分清谁说的」。
+   之前用户消息是 #eff4ff 淡蓝 + 左对齐，跟 agent 的白卡片几乎一样，
+   自己发的那句话混在过程里根本找不着 —— 所以改成右侧实心蓝气泡。 */
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 18px;
+}
 .msg-role {
-  font-size: 11px; color: var(--muted); margin-bottom: 5px; letter-spacing: .5px;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 6px; letter-spacing: .5px;
 }
 .msg-body {
+  max-width: 84%;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 11px 14px;
-  line-height: 1.75;
+  padding: 12px 15px;
+  line-height: 1.78;
   overflow-wrap: anywhere;
 }
-.msg.user .msg-body { background: var(--primary-soft); border-color: #dbe6ff; }
-.msg.agent .msg-body { border-left: 3px solid var(--primary); }
-.msg.error .msg-body { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+
+/* 我说的：靠右，实心蓝 */
+.msg.user { align-items: flex-end; }
+.msg.user .msg-role { text-align: right; color: var(--primary); font-weight: 600; }
+.msg.user .msg-body {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 12px 12px 3px 12px;
+  white-space: pre-wrap;
+}
+
+/* agent 说的：靠左，素净的白卡片。
+   之前给它加了 3px 蓝色左边线想做区分，结果两边都在抢注意力，
+   反而显得脏 —— 区分已经由「左右 + 蓝白」承担了，这边就别再加装饰。 */
+.msg.agent { align-items: flex-start; }
+.msg.agent .msg-role { font-weight: 600; color: var(--primary); }
+
+.msg.error { align-items: flex-start; }
+.msg.error .msg-body { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.msg.error .msg-role { color: var(--danger); font-weight: 600; }
 
 .msg-body h1, .msg-body h2, .msg-body h3 { font-size: 15px; margin: 10px 0 6px; }
 .msg-body p { margin: 7px 0; }
@@ -171,17 +199,26 @@ body {
 }
 .tool-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; cursor: pointer; user-select: none;
+  padding: 9px 12px; cursor: pointer; user-select: none;
 }
-.tool-head:hover { background: #f2f5f9; }
+.tool-head:hover { background: #eef2f8; }
 .tool-name {
-  font-family: Consolas, monospace; font-size: 12.5px;
+  font-family: Consolas, monospace; font-size: 13px;
   color: var(--primary); font-weight: 600;
 }
-.tool-arrow { color: var(--muted); font-size: 10px; transition: transform .15s; }
-.tool.collapsed .tool-arrow { transform: rotate(-90deg); }
-.tool-badge { color: var(--muted); font-size: 11px; margin-left: auto; }
+/* 默认是折叠态，箭头指右（▶ 可展开）；展开后转成指下 */
+.tool-arrow { color: var(--muted); font-size: 10px; transition: transform .15s; display: inline-block; }
+.tool:not(.collapsed) .tool-arrow { transform: rotate(90deg); }
+.tool-badge {
+  color: var(--muted); font-size: 11.5px; margin-left: auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%;
+}
 .tool-badge.deny { color: var(--danger); }
+/* 折叠时也能一眼看出这个工具成功还是失败 */
+.tool-state { font-size: 13px; font-weight: 700; margin-left: 6px; min-width: 12px; text-align: center; }
+.tool-state.ok { color: #16a34a; }
+.tool-state.bad { color: var(--danger); }
+.tool-state.pending { color: #9ca3af; }
 .tool-body { display: none; padding: 0 12px 11px; }
 .tool:not(.collapsed) .tool-body { display: block; }
 .tool-label { font-size: 11px; color: var(--muted); margin: 6px 0 3px; }
@@ -201,27 +238,46 @@ body {
 /* 一个任务的容器：运行中装过程，结束后整体折叠 */
 .task-box { margin: 0; }
 
+/* 运行时顶部的状态条：告诉人「它还在动，没卡死，现在是第几步」 */
+.thinking-live {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--primary); font-size: 12.5px; font-weight: 600;
+  padding: 7px 14px; margin: 2px 0 12px;
+  background: var(--primary-soft);
+  border: 1px solid #cfdffd;
+  border-radius: 999px;
+}
+.spin {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid #c3d7ff; border-top-color: var(--primary);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* 折叠的思考过程：默认收起，点 summary 展开 */
 details.thinking {
-  margin: 10px 0;
-  border: 1px dashed #cfd6df;
+  margin: 12px 0;
+  border: 1px dashed #c3ccd8;
   border-radius: var(--radius);
   background: #fafbfc;
   overflow: hidden;
 }
 details.thinking summary {
   cursor: pointer;
-  padding: 8px 13px;
+  padding: 9px 14px;
+  background: #f1f4f8;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
   user-select: none;
   list-style: none;
 }
 details.thinking summary::-webkit-details-marker { display: none; }
 details.thinking summary::before { content: "▸ "; }
 details.thinking[open] summary::before { content: "▾ "; }
-details.thinking summary:hover { color: var(--primary); }
-details.thinking > *:not(summary) { margin-left: 8px; margin-right: 8px; }
+details.thinking[open] summary { border-bottom: 1px dashed #dfe4ea; }
+details.thinking summary:hover { color: var(--primary); background: #eaf1ff; }
+details.thinking > *:not(summary) { margin-left: 10px; margin-right: 10px; }
 details.thinking > .msg:last-child { margin-bottom: 0; }
 
 /* ---------------- 输入区 ---------------- */
