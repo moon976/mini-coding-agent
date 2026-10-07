@@ -29,8 +29,9 @@ from urllib.parse import parse_qs, urlparse
 
 from .agent import Agent
 from .cli import build_client
-from .config import WORKSPACE_DIR, ensure_workspace
+from .config import TRACES_DIR, WORKSPACE_DIR, ensure_workspace
 from .tools import set_confirm_hook
+from .trace import TraceRecorder, report_data
 
 WEB_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web"
@@ -86,8 +87,14 @@ class Session:
             return False
 
 
-def _run_task(session: Session, task: str, use_mock: bool, script: str, max_steps: int) -> None:
-    """在后台线程里跑一个任务，把全过程变成事件流。"""
+def _run_task(session: Session, task: str, use_mock: bool, script: str,
+              max_steps: int, record_trace: bool = True) -> None:
+    """在后台线程里跑一个任务，把全过程变成事件流。
+
+    record_trace=True 时，同一份事件除了推给浏览器，还会同时落盘到 traces/。
+    注意这里没有第二套逻辑：主循环只管 emit，我们在转发的同时顺手抄一份 ——
+    网页跑出来的任务和命令行跑出来的，进的是同一份统计。
+    """
     try:
         client = build_client(use_mock, script, announce=False)
     except RuntimeError as e:
@@ -99,11 +106,20 @@ def _run_task(session: Session, task: str, use_mock: bool, script: str, max_step
     mode = f"假模型（剧本 {script}）" if use_mock else f"真实模型 {client.model}"
     session.emit("mode", mode=mode, mock=use_mock)
 
+    recorder = TraceRecorder.new_file(TRACES_DIR, task) if record_trace else None
+    if recorder:
+        session.emit("notice", message="本次过程会记录到 traces/，可用「统计报告」汇总")
+
+    def on_event(kind: str, payload: dict) -> None:
+        session.emit(kind, **payload)
+        if recorder is not None:
+            recorder.record(kind, payload)
+
     agent = Agent(
         client,
         max_steps=max_steps,
         verbose=False,
-        on_event=lambda kind, payload: session.emit(kind, **payload),
+        on_event=on_event,
     )
     session.agent = agent
     try:
@@ -111,6 +127,9 @@ def _run_task(session: Session, task: str, use_mock: bool, script: str, max_step
     except Exception as e:  # 兜底：任何意外都要告诉界面，而不是让线程悄悄死掉
         session.emit("error", message=f"{type(e).__name__}: {e}")
     finally:
+        if recorder is not None:
+            recorder.close()
+            session.emit("trace", path=os.path.basename(recorder.path))
         session.agent = None
         session.busy = False
         session.emit("end", ok=True)
@@ -223,6 +242,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(_file_tree())
         elif path == "/api/file":
             self._send_file_content((qs.get("path") or [""])[0])
+        elif path == "/api/report":
+            # 结构化统计（跟命令行 --report 同一份聚合结果，口径不会打架）
+            self._send_json(report_data(TRACES_DIR))
         else:
             self.send_error(404)
 
@@ -301,6 +323,8 @@ class Handler(BaseHTTPRequestHandler):
 
         use_mock = bool(body.get("mock"))
         script = body.get("script") or "fix"
+        # 默认落盘：网页是最顺手的跑批量任务的地方，不落盘就白跑了
+        record_trace = body.get("trace", True) is not False
         try:
             max_steps = int(body.get("max_steps") or 20)
         except (TypeError, ValueError):
@@ -310,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
         self.session.busy = True
         threading.Thread(
             target=_run_task,
-            args=(self.session, task, use_mock, script, max_steps),
+            args=(self.session, task, use_mock, script, max_steps, record_trace),
             daemon=True,  # 主线程退出时不必等它
         ).start()
         self._send_json({"ok": True})

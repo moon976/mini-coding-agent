@@ -19,6 +19,7 @@ from mini_agent.trace import (  # noqa: E402
     TraceRecorder,
     load_events,
     report,
+    report_data,
     summarize,
 )
 
@@ -115,6 +116,34 @@ class TraceTest(unittest.TestCase):
         self.assertIn("50.0%", text)   # 2 个任务里 1 个成功
         self.assertIn("正常完成", text)
         self.assertIn("达到步数上限", text)
+
+    def test_report_data_matches_report(self):
+        """网页端和命令行必须共用同一份聚合结果 —— 两边数字不能各说各话。"""
+        for name, kinds in (
+            ("one.jsonl", ("start", "step", "done")),
+            ("two.jsonl", ("start", "step", "max_steps")),
+        ):
+            rec = TraceRecorder(os.path.join(self.dir, name))
+            for k in kinds:
+                rec.record(k, {})
+            rec.close()
+
+        d = report_data(self.dir)
+        self.assertEqual(d["count"], 2)
+        self.assertEqual(d["success_count"], 1)
+        self.assertEqual(d["success_rate"], 50.0)
+        self.assertEqual(d["outcomes"]["done"]["label"], "正常完成")
+        self.assertEqual(d["outcomes"]["max_steps"]["count"], 1)
+        self.assertEqual(len(d["rows"]), 2)
+        self.assertIsNone(d["tokens"])   # 没有 usage 就不该编一个 token 数字出来
+
+        # 同一份数据渲染出的文本里，必须出现同一个成功率
+        self.assertIn("50.0%", report(self.dir))
+
+    def test_report_data_on_empty_dir(self):
+        d = report_data(self.dir)
+        self.assertEqual(d["count"], 0)
+        self.assertEqual(d["rows"], [])
 
 
 if __name__ == "__main__":
