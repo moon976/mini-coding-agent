@@ -172,9 +172,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_file(self, rel_path: str) -> None:
-        # 只服务 web/ 目录里的文件，且把 ../ 挡在外面
+        # 只服务 web/ 目录里的文件，且把 ../ 挡在外面。
+        #
+        # 判据必须带 os.sep，不能只写 startswith(WEB_DIR)：
+        # 只判前缀的话，/../web-backup/x.txt 会解析成 .../coding-agent/web-backup/x.txt，
+        # 它同样「以 web 开头」，于是被误放行 —— 任何名字以 web 开头的兄弟目录都能被读到。
+        # 这里跟 tools.py 的 _safe_path 保持同一套判据（审计时发现的写法不一致）。
         safe = os.path.normpath(os.path.join(WEB_DIR, rel_path.lstrip("/")))
-        if not safe.startswith(WEB_DIR) or not os.path.isfile(safe):
+        if not (safe == WEB_DIR or safe.startswith(WEB_DIR + os.sep)):
+            self.send_error(404)
+            return
+        if not os.path.isfile(safe):
             self.send_error(404)
             return
         ext = os.path.splitext(safe)[1].lower()

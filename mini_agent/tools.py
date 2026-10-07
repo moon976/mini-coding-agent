@@ -22,7 +22,13 @@ import re
 import subprocess
 import sys
 
-from .config import COMMAND_BLACKLIST, DANGEROUS_PATTERNS, WORKSPACE_DIR, ensure_workspace
+from .config import (
+    COMMAND_BLACKLIST,
+    DANGEROUS_PATTERNS,
+    WORKSPACE_DIR,
+    ensure_workspace,
+    normalize_command,
+)
 
 # 工具输出的最大字符数。模型上下文有限，超长输出会把对话撑爆。
 MAX_OUTPUT_CHARS = 8000
@@ -235,9 +241,10 @@ def tool_run_command(command: str, timeout: int = 30) -> str:
       2. 高危：停下来问人，人点头才执行
       3. 沙盒：命令的工作目录固定在 workspace/ 内
     """
-    low = command.strip().lower()
+    # 先把两边都规范化（连续空白压成一个），否则 `rm  -rf  /` 这种多打空格的写法会漏过去
+    low = normalize_command(command)
     for bad in COMMAND_BLACKLIST:
-        if bad in low:
+        if normalize_command(bad) in low:
             return f"错误：命令被安全策略拒绝（包含危险片段：{bad}）"
 
     reason = _danger_reason(command)

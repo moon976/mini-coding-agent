@@ -7,6 +7,9 @@
 workspace/*
 !workspace/hello.py
 
+# 任务过程落盘（traces/*.jsonl）：运行产物，不是项目代码
+traces/
+
 # Python / 编辑器产物
 __pycache__/
 *.pyc

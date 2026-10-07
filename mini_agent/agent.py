@@ -65,7 +65,7 @@ class Agent:
         """把一件事告诉外部。kind 决定了呈现方式，payload 是具体内容。"""
         fn = self.on_event
         if fn is None:
-            fn = self._print_event if self.verbose else None
+            fn = self.print_event if self.verbose else None
         if fn is None:
             return
         try:
@@ -73,8 +73,12 @@ class Agent:
         except Exception:  # 显示层出错绝不能反过来把 agent 弄崩
             pass
 
-    def _print_event(self, kind: str, p: dict) -> None:
-        """命令行的默认呈现方式（保持和改造前一模一样的输出格式）。"""
+    def print_event(self, kind: str, p: dict) -> None:
+        """命令行的默认呈现方式（保持和改造前一模一样的输出格式）。
+
+        做成公开方法，是因为命令行要把它和「落盘 trace」串起来用：
+        同一个事件既打印给人看，也写进文件供事后复盘。
+        """
         if kind == "step":
             print(f"\n─── 第 {p['step']} 步 " + "─" * 30)
         elif kind == "compact":

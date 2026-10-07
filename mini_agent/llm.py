@@ -255,6 +255,9 @@ class MockClient:
         self.usage = {"prompt": 0, "completion": 0, "total": 0, "requests": 0, "retries": 0}
 
     def chat(self, messages: list, tools: list = None) -> AssistantMessage:
+        # 假模型不消耗 token，但要照常计数，这样 trace 里的「请求次数」一项才有意义
+        self.usage["requests"] += 1
+
         # 用「历史里已有几条 assistant 消息」决定现在该说第几句
         turn = sum(1 for m in messages if m.get("role") == "assistant")
 

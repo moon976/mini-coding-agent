@@ -6,11 +6,14 @@
 """
 
 import os
+import re
 
 # 项目根目录（coding-agent/）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # agent 只能在这个目录里读写文件，防止它误改你电脑上的其它文件
 WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
+# 任务过程落盘的目录（traces/*.jsonl），见 trace.py。里面是运行产物，不进仓库。
+TRACES_DIR = os.path.join(ROOT_DIR, "traces")
 
 # 对话历史的字符预算。超过就会触发压缩（见 context.py）。
 # 为什么用「字符数」而不是「token 数」？
@@ -19,7 +22,20 @@ WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
 MAX_CONTEXT_CHARS = 20000
 
 # 第一层：绝对黑名单。命中直接拒绝，连问都不问。
+#
+# 比对前必须先用 normalize_command() 把两边的连续空白压成一个 ——
+# 否则 `rm  -rf  /`（中间多打一个空格）就绕过去了：子串匹配怕空白变化。
+# 这里不用正则，是因为「加了 $ 锚点会让匹配范围悄悄变窄」这类陷阱更容易发生，
+# 而黑名单要的是最大覆盖；规范化之后再比对，两种写法的优点就都拿到了。
 COMMAND_BLACKLIST = ("rm -rf /", "format c:", "shutdown", "del /f /s /q c:")
+
+
+def normalize_command(cmd: str) -> str:
+    """把命令里的连续空白压成一个空格，并转小写，供黑名单比对使用。
+
+    实测：`rm  -rf  /` 用子串判据是漏报的，规范化之后才是 `rm -rf /`，能正常命中。
+    """
+    return re.sub(r"\s+", " ", cmd.strip()).lower()
 
 # 第二层：高危命令。不直接拒绝，但执行前必须让人按一次 y。
 #

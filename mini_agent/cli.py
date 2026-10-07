@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 from .agent import Agent
-from .config import load_settings
+from .config import TRACES_DIR, load_settings
 from .llm import MockClient, OpenAICompatClient
 from .tools import set_confirm_hook
 
@@ -90,7 +89,23 @@ def main() -> None:
         help="启动网页界面（浏览器打开 http://127.0.0.1:8000）",
     )
     parser.add_argument("--port", type=int, default=8000, help="网页界面的端口，默认 8000")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="把本次任务的完整事件流存到 traces/ 目录（jsonl），可事后复盘与统计",
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="读取 traces/ 里所有记录，打印成功率 / 平均步数 / 平均 token 等统计",
+    )
     args = parser.parse_args()
+
+    if args.report:
+        from .trace import report
+
+        print(report(TRACES_DIR))
+        return
 
     if args.web:
         from .web import serve
@@ -115,10 +130,37 @@ def main() -> None:
     except RuntimeError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
-    agent = Agent(client, max_steps=args.max_steps, verbose=not args.quiet)
+    agent = Agent(client, max_steps=args.max_steps, verbose=False)
+
+    # 把「打印给人看」和「落盘供复盘」串在同一个 handler 上。
+    # 主循环不知道、也不需要知道有第二个人在听 —— 它只管 emit。
+    printer = agent.print_event if not args.quiet else None
+    current: list = [None]
+
+    def _emit(kind: str, payload: dict) -> None:
+        if current[0] is not None:
+            current[0].record(kind, payload)
+        if printer is not None:
+            printer(kind, payload)
+
+    agent.on_event = _emit
+
+    def run_one(task: str) -> None:
+        if args.trace:
+            from .trace import TraceRecorder
+
+            rec = TraceRecorder.new_file(TRACES_DIR, hint=task)
+            current[0] = rec
+            print(f"[trace] 本次过程会存到 {rec.path}")
+        try:
+            agent.run(task)
+        finally:
+            if current[0] is not None:
+                current[0].close()
+                current[0] = None
 
     if args.task:
-        agent.run(args.task)
+        run_one(args.task)
         return
 
     print("已进入交互模式，输入任务回车执行；输入 exit 退出。")
@@ -132,4 +174,4 @@ def main() -> None:
             continue
         if task.lower() in ("exit", "quit", "q"):
             break
-        agent.run(task)
+        run_one(task)
