@@ -19,6 +19,8 @@ const els = {
   scriptField: $('script-field'),
   script: $('script-select'),
   maxSteps: $('max-steps'),
+  trace: $('trace-toggle'),
+  report: $('report-btn'),
   confirmBox: $('confirm-box'),
   confirmReason: $('confirm-reason'),
   confirmCmd: $('confirm-cmd'),
@@ -139,6 +141,68 @@ function addNotice(text) {
   d.textContent = text;
   target().appendChild(d);
   scrollDown();
+}
+
+// ---------------------------------------------------------------- 统计报告
+
+// 读后端 /api/report（跟命令行 --report 同一份聚合结果）渲染成一小块面板。
+// 目的是让「跑一批任务」这件事能在网页里闭环：发任务 → 自动落盘 → 随时看数字。
+function renderReport(d) {
+  const box = document.createElement('div');
+  box.className = 'report-box';
+  if (!d.count) {
+    box.innerHTML = '<h4>统计报告</h4><div class="rep-note">traces/ 里还没有记录。' +
+      '勾选「记录 trace」跑几个任务就有了。</div>';
+    return box;
+  }
+
+  const cells = [];
+  const cell = (k, v) => '<div class="rep-cell"><div class="rep-k">' + k +
+    '</div><div class="rep-v">' + v + '</div></div>';
+  cells.push(cell('任务数', d.count));
+  cells.push(cell('成功率', d.success_rate + '%'));
+  cells.push(cell('平均步数', d.means.steps));
+  cells.push(cell('平均工具调用', d.means.tool_calls));
+  cells.push(cell('平均失败', d.means.tool_failures));
+  cells.push(cell('平均请求', d.means.requests));
+  if (d.tokens) {
+    cells.push(cell('平均输入 token', d.tokens.prompt));
+    cells.push(cell('平均输出 token', d.tokens.completion));
+    if (d.tokens.ratio) cells.push(cell('输入:输出', d.tokens.ratio + ' : 1'));
+  }
+
+  const dist = Object.keys(d.outcomes || {})
+    .filter((k) => d.outcomes[k].count)
+    .map((k) => escapeHtml(d.outcomes[k].label) + ' ' + d.outcomes[k].count +
+      ' 个（' + d.outcomes[k].pct + '%）')
+    .join('　·　');
+
+  const rows = (d.rows || []).map((r) =>
+    '<tr><td>' + escapeHtml(r.outcome) + '</td><td>' + r.steps + '</td><td>' +
+    r.tool_calls + '</td><td>' + r.tool_failures + '</td><td>' +
+    (r.total_tokens || '-') + '</td><td>' + escapeHtml(r.task || '') + '</td></tr>'
+  ).join('');
+
+  box.innerHTML =
+    '<h4>统计报告 · traces/ 共 ' + d.count + ' 个任务</h4>' +
+    '<div class="rep-grid">' + cells.join('') + '</div>' +
+    (dist ? '<div class="rep-note">结局分布：' + dist + '</div>' : '') +
+    '<table><thead><tr><th>结局</th><th>步</th><th>调用</th><th>失败</th>' +
+    '<th>token</th><th>任务</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<div class="rep-note">命令行 <code>python main.py --report</code> 可看完整版。</div>';
+  return box;
+}
+
+async function showReport() {
+  try {
+    const res = await fetch('/api/report');
+    const d = await res.json();
+    clearHint();
+    els.messages.appendChild(renderReport(d));
+    scrollDown(true);
+  } catch (_e) {
+    addNotice('读取统计失败');
+  }
 }
 
 // ---------------------------------------------------------------- 思考过程折叠
@@ -380,6 +444,9 @@ function handleEvent(ev) {
     case 'notice':
       addNotice(ev.message);
       break;
+    case 'trace':
+      addNotice('已存入 traces/' + ev.path + '（可点「统计报告」汇总）');
+      break;
     case 'error':
       abortTask();   // 出错保持展开，方便看细节
       addBlock('error', '<div class="msg-role">出错</div><div class="msg-body">' + escapeHtml(ev.message) + '</div>');
@@ -452,6 +519,7 @@ function send() {
       mock: els.mode.value === 'mock',
       script: els.script.value,
       max_steps: parseInt(els.maxSteps.value, 10) || 20,
+      trace: els.trace.checked,   // 默认勾选：网页跑的任务也进统计
     }),
   })
     .then((r) => r.json())
@@ -477,6 +545,7 @@ els.mode.addEventListener('change', () => {
 });
 
 els.refresh.addEventListener('click', loadTree);
+els.report.addEventListener('click', showReport);
 
 function showConfirm(command, reason) {
   els.confirmReason.textContent = reason;

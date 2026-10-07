@@ -34,6 +34,11 @@
       <span>最多步数</span>
       <input id="max-steps" type="number" value="20" min="1" max="100">
     </label>
+    <label class="field checkbox" title="把每一步事件存到 traces/*.jsonl，可事后复盘与统计">
+      <input id="trace-toggle" type="checkbox" checked>
+      <span>记录 trace</span>
+    </label>
+    <button id="report-btn" class="mini-btn" title="汇总 traces/ 里所有记录">统计报告</button>
     <div class="status"><span id="status-dot" class="dot idle"></span><span id="status-text">空闲</span></div>
   </div>
 </header>
