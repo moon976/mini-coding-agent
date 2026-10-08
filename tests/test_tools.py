@@ -119,6 +119,34 @@ class ToolsTest(unittest.TestCase):
         result = tool_run_command("python -c \"print(1)\"")
         self.assertIn("退出码", result)
 
+    def test_multiline_command_is_refused(self):
+        """含换行的命令必须被拦下来，而不是「静默只跑第一行还报成功」。
+
+        这是通过 trace 复盘挖出来的：实测 `echo a↵echo b` 只输出 a，退出码却是 0；
+        `python -c "↵print(1)↵"` 干脆什么都没有。对 agent 来说这比报错更危险 ——
+        它会拿着「执行成功但没输出」这个假结论继续推理。
+        """
+        result = tool_run_command("echo a\necho b")
+        self.assertIn("换行", result)
+        self.assertIn("静默丢弃", result)
+        self.assertIn("write_file", result)  # 得给一条能走通的替代方案
+
+    def test_multiline_command_does_not_execute_first_line(self):
+        """拦下来还不够：连第一行都不能执行，否则副作用照样发生。
+
+        实测 `echo a↵echo b` 在修复前是「只输出 a」，所以这里断言 b 不在也 a 不在。
+        （刻意不写文件：写文件的命令会命中「重定向覆盖」那条高危规则，
+        先弹确认框，测不到换行这一层。）
+        """
+        result = tool_run_command("echo aaa\necho bbb")
+        self.assertNotIn("aaa", result)
+        self.assertNotIn("bbb", result)
+
+    def test_dangerous_multiline_command_still_refused_as_dangerous(self):
+        """既危险又多行时，优先按危险处理 —— 安全判据不能因为换行就失效。"""
+        result = tool_run_command("rm -rf /\necho ok")
+        self.assertIn("安全策略拒绝", result)
+
     # ---------------------------------------------------------- execute_tool
 
     def test_unknown_tool_lists_available_ones(self):
@@ -138,6 +166,16 @@ class ToolsTest(unittest.TestCase):
     def test_path_escape_becomes_text_not_exception(self):
         result = execute_tool("read_file", '{"path": "../../etc/passwd"}')
         self.assertIn("路径越界", result)
+
+    def test_path_escape_explains_the_boundary(self):
+        """错误文案必须把边界讲清楚，不能只说「越界」。
+
+        实测教训：早期只说「路径越界」，模型理解成「文件不存在」，
+        还会一本正经地编解释 —— 它压根不知道是自己被挡住了。
+        """
+        result = execute_tool("read_file", '{"path": "../.env"}')
+        self.assertIn("workspace/", result)
+        self.assertIn("不等于文件不存在", result)
 
 
 if __name__ == "__main__":

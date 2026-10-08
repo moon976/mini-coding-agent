@@ -47,7 +47,15 @@ def _safe_path(rel_path: str) -> str:
     base = os.path.abspath(WORKSPACE_DIR)
     target = os.path.abspath(os.path.join(base, rel_path))
     if not (target == base or target.startswith(base + os.sep)):
-        raise ValueError(f"路径越界：{rel_path} 不在工作目录内")
+        # 措辞是刻意写详细的。早期版本只说「路径越界」，结果模型以为
+        # 「文件不存在」，还会一本正经地编一个解释 —— 它不知道是自己被挡住了。
+        # 现在把边界讲清楚，它才知道该换路径，而不是去猜文件去哪了。
+        raise ValueError(
+            f"路径越界：{rel_path} 不在工作目录内。"
+            f"你只能读写 workspace/ 里的文件，这是硬性限制 —— "
+            f"不等于文件不存在，只是它不在你的可见范围内。"
+            f"要访问外面的文件请让用户自己操作，或让用户把它复制进 workspace/。"
+        )
     return target
 
 
@@ -255,6 +263,20 @@ def tool_run_command(command: str, timeout: int = 30) -> str:
                 f"已取消执行：这条命令会【{reason}】，人没有确认。\n"
                 f"请换一个更安全的方式达成目的，不要原样重试这条命令。"
             )
+
+    # 换行会引发一种特别阴的失败：shell 只执行第一行，其余被静默丢弃，
+    # 而且退出码照常是 0 —— 看起来「执行成功了」，其实后面几行根本没跑。
+    # 这对 agent 比对人更危险：它拿到的是「成功但没输出」，会基于这个假结论继续推理。
+    # （实测：echo a↵echo b 只输出 a，退出码 0；python -c "↵print(1)↵" 完全没有输出。）
+    # 所以这里显式拦下来并把原因讲清楚，让模型能自己换成单行或写脚本文件。
+    # 放在安全检查之后：既危险又多行的命令，优先按危险处理。
+    if "\n" in command or "\r" in command:
+        return (
+            "错误：这条命令包含换行，shell 只会执行第一行，其余会被静默丢弃，"
+            "而退出码仍然是 0（看着像成功，实际没执行）——不要用它的结果做判断。\n"
+            "请改写成单行（多条命令用 && 或 ; 连接），"
+            "或者先用 write_file 写一个 .py 脚本，再用 run_command 执行它。"
+        )
 
     ensure_workspace()
     try:
