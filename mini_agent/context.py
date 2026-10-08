@@ -16,19 +16,26 @@
 
 from __future__ import annotations
 
-from .config import MAX_CONTEXT_CHARS
+from .config import MAX_CONTEXT_TOKENS
+from .tokens import TokenEstimator
 
 
 MAX_COMPACT_ROUNDS = 50
 
 
 class Conversation:
-    """一段对话历史，带「超预算就压缩」的能力。"""
+    """一段对话历史，带「超预算就压缩」的能力。
 
-    def __init__(self, system_prompt: str, budget_chars: int = MAX_CONTEXT_CHARS):
+    预算的单位是 **token** 而不是字符（理由见 config.py 和 tokens.py）。
+    """
+
+    def __init__(self, system_prompt: str, budget_tokens: int = MAX_CONTEXT_TOKENS,
+                 estimator: TokenEstimator | None = None):
         self.system = {"role": "system", "content": system_prompt}
         self.messages: list = []
-        self.budget = budget_chars
+        self.budget = budget_tokens
+        # 不给就自己建一个。给了的话（比如测试里想钉死单价），全程共用同一个。
+        self.estimator = estimator or TokenEstimator()
         self.task: str = ""
         self.compactions = 0
 
@@ -42,11 +49,22 @@ class Conversation:
         return [self.system] + self.messages
 
     def size(self) -> int:
-        """当前历史大概占多少字符（粗略估算，够用了）。"""
+        """当前历史占多少字符。只用于展示/对照，判断预算用的是 tokens()。"""
         total = len(self.system["content"])
         for m in self.messages:
             total += len(str(m.get("content") or ""))
         return total
+
+    def tokens(self) -> int:
+        """当前历史大概占多少 token —— 压缩判断以它为准。"""
+        return self.estimator.estimate(self.size())
+
+    def calibrate(self, real_prompt_tokens: int) -> bool:
+        """把模型返回的真实 prompt_tokens 喂回估算器，让它下次估得更准。
+
+        在每次请求之后调用。攒够两次样本才校准得出来，所以第一次返回 False 是正常的。
+        """
+        return self.estimator.calibrate(self.size(), real_prompt_tokens)
 
     def compact(self) -> bool:
         """压缩一次：删掉最早的一整组「模型说话 + 它引发的工具结果」。成功返回 True。
@@ -91,7 +109,10 @@ class Conversation:
         哪怕将来压缩逻辑被人改坏、每轮不再变小，也只是放弃压缩而不是卡死整个程序。
         """
         rounds = 0
-        while self.size() > self.budget and rounds < MAX_COMPACT_ROUNDS:
+        # 注意这里判的是 tokens() 而不是 size()：预算单位是 token。
+        # 保险丝仍然保留 —— 哪怕将来压缩逻辑被人改坏、每轮不再变小，
+        # 也只是放弃压缩而不是卡死整个程序。
+        while self.tokens() > self.budget and rounds < MAX_COMPACT_ROUNDS:
             if not self.compact():
                 break
             rounds += 1

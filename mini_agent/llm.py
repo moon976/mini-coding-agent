@@ -82,6 +82,7 @@ class OpenAICompatClient:
         self.client = OpenAI(api_key=api_key, base_url=base_url or None)
         # 累计消耗。有了它，「上下文管理为什么重要」就从一句空话变成了能看见的数字。
         self.usage = {"prompt": 0, "completion": 0, "total": 0, "requests": 0, "retries": 0}
+        self.last_prompt_tokens = 0  # 单次请求的 prompt token，供 token 估算器校准
 
     def _should_retry(self, err: Exception) -> bool:
         """判断这个错误值不值得再试一次。"""
@@ -129,6 +130,10 @@ class OpenAICompatClient:
                     self.usage["prompt"] += getattr(u, "prompt_tokens", 0) or 0
                     self.usage["completion"] += getattr(u, "completion_tokens", 0) or 0
                     self.usage["total"] += getattr(u, "total_tokens", 0) or 0
+                    # 单独留一份「本次请求」的 prompt token。
+                    # 上面的 usage["prompt"] 是累计值，而 tokens.py 的校准需要单次观测
+                    # （两次单次的差分才能消掉工具说明书那份固定开销）。
+                    self.last_prompt_tokens = getattr(u, "prompt_tokens", 0) or 0
                 msg = resp.choices[0].message
                 calls = [
                     ToolCall(id=tc.id, name=tc.function.name, arguments=tc.function.arguments)
@@ -253,6 +258,8 @@ class MockClient:
         self.task = None
         # 假模型不消耗真 token，但保持同样的结构，主循环就不用区分两种客户端
         self.usage = {"prompt": 0, "completion": 0, "total": 0, "requests": 0, "retries": 0}
+        # 恒为 0 → 估算器拿不到观测就不会校准，保持初始猜测值。这正是我们想要的行为。
+        self.last_prompt_tokens = 0
 
     def chat(self, messages: list, tools: list = None) -> AssistantMessage:
         # 假模型不消耗 token，但要照常计数，这样 trace 里的「请求次数」一项才有意义

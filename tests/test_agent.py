@@ -7,6 +7,7 @@
     4. 事件流完整（网页和 trace 都靠它）
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -143,6 +144,69 @@ class AgentLoopTest(unittest.TestCase):
         for expected in ("start", "step", "message", "tool_call", "tool_result", "done"):
             with self.subTest(event=expected):
                 self.assertIn(expected, kinds)
+
+
+class UsageCalibrationTest(unittest.TestCase):
+    """验证「真实 token 消耗」真的回流到了 token 估算器里。
+
+    这条链路很容易接漏：估算器写好了、context 也有 calibrate 方法，
+    但主循环如果忘了在每次请求后调用它，校准就永远不会发生 ——
+    而代码照样能跑，只是悄悄退化成「永远用初始猜测值」。
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        old = tools.WORKSPACE_DIR
+        tools.WORKSPACE_DIR = self._tmp.name
+        self.addCleanup(setattr, tools, "WORKSPACE_DIR", old)
+
+    def test_real_usage_is_fed_back_to_estimator(self):
+        # 一条能产生大段输出的命令，保证两次观测之间历史涨得够多（阈值 500 字符）
+        dump = json.dumps({"command": "python -c \"print('x'*1200)\""})
+
+        class FakeClient:
+            """第一次要工具、第二次收尾；每次都报一个「真实」的 prompt token 数。
+
+            构造方式：500 是固定的工具说明书开销，2.0 是真实单价（2 字符 = 1 token）。
+            能从这个假数据里反推出 2.0，就说明差分确实把那 500 的固定开销消掉了。
+            """
+
+            def __init__(self):
+                self.usage = {"prompt": 0, "completion": 0, "total": 0,
+                              "requests": 0, "retries": 0}
+                self.last_prompt_tokens = 0
+                self.calls = 0
+
+            def chat(self, messages, tools=None):
+                self.calls += 1
+                chars = sum(len(str(m.get("content") or "")) for m in messages)
+                self.last_prompt_tokens = 500 + int(chars / 2.0)
+                self.usage["requests"] += 1
+                from mini_agent.llm import AssistantMessage, ToolCall
+                if self.calls == 1:
+                    return AssistantMessage(
+                        content="",
+                        tool_calls=[ToolCall(id="c1", name="run_command", arguments=dump)],
+                    )
+                return AssistantMessage(content="好了", tool_calls=[])
+
+        client = FakeClient()
+        agent = Agent(client, max_steps=3, verbose=False)
+        agent.run("任务")
+
+        self.assertEqual(client.calls, 2, "这条测试需要恰好两次请求才校准得出单价")
+        est = agent.history.estimator
+        self.assertEqual(est.calibrations, 1)
+        # 初始 2.5 被拉向真实值 2.0：2.5*0.5 + 2.0*0.5 = 2.25
+        self.assertAlmostEqual(est.chars_per_token, 2.25, delta=0.05)
+
+    def test_zero_usage_leaves_estimator_untouched(self):
+        """假模型 usage 恒为 0，估算器应该保持初始猜测，不能被 0 带偏。"""
+        agent = Agent(MockClient("fix"), max_steps=1, verbose=False)
+        agent.run("随便一个任务")
+        self.assertEqual(agent.history.estimator.calibrations, 0)
+        self.assertEqual(agent.history.estimator.chars_per_token, 2.5)
 
 
 if __name__ == "__main__":

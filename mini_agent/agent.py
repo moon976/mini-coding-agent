@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from .config import MAX_CONTEXT_CHARS
+from .config import MAX_CONTEXT_TOKENS
 from .context import Conversation
 from .llm import AssistantMessage
 from .tools import TOOL_SCHEMAS, execute_tool
@@ -110,12 +110,18 @@ class Agent:
         一旦超过预算 Conversation 就会自动压缩，这就是为什么
         长任务跑下去也不会把上下文撑爆。
         """
-        total = self.history.size() if self.history else 0
-        compactions = self.history.compactions if self.history else 0
-        line = (
-            f"[统计] 对话历史：{total} 字符 / 预算 {MAX_CONTEXT_CHARS}"
-            f"，压缩过 {compactions} 次"
-        )
+        history = self.history
+        total = history.size() if history else 0
+        compactions = history.compactions if history else 0
+        # 预算以 token 为单位；顺带把字符数和校准后的单价打出来，方便对照
+        if history:
+            roughly = history.tokens()
+            line = (
+                f"[统计] 对话历史：{total} 字符 ≈ {roughly} token / 预算 {history.budget}"
+                f"，压缩过 {compactions} 次"
+            )
+        else:
+            line = f"[统计] 对话历史：{total} 字符，压缩过 {compactions} 次"
         usage = getattr(self.client, "usage", None)
         if usage and usage.get("requests"):
             extra = f"，共 {usage['requests']} 次请求"
@@ -138,7 +144,7 @@ class Agent:
     def run(self, task: str) -> str:
         """执行一个任务，返回模型的最终答复。"""
         self._stop_requested = False
-        self.history = Conversation(SYSTEM_PROMPT, budget_chars=MAX_CONTEXT_CHARS)
+        self.history = Conversation(SYSTEM_PROMPT, budget_tokens=MAX_CONTEXT_TOKENS)
         self.history.add({"role": "user", "content": task})
         self.emit("start", task=task, max_steps=self.max_steps)
 
@@ -161,6 +167,11 @@ class Agent:
             except Exception as e:  # 网络/认证出错时不能让整个程序崩掉
                 self.emit("error", message=str(e))
                 return f"出错：{e}"
+
+            # 趁回复还没加进历史，用这次的真实消耗校准 token 估算器。
+            # 此刻 history 的内容正好就是刚刚发出去的那一份，对得上。
+            self.history.calibrate(getattr(self.client, "last_prompt_tokens", 0) or 0)
+
             self.history.add(reply.to_message())
 
             if reply.content:

@@ -15,11 +15,19 @@ WORKSPACE_DIR = os.path.join(ROOT_DIR, "workspace")
 # 任务过程落盘的目录（traces/*.jsonl），见 trace.py。里面是运行产物，不进仓库。
 TRACES_DIR = os.path.join(ROOT_DIR, "traces")
 
-# 对话历史的字符预算。超过就会触发压缩（见 context.py）。
-# 为什么用「字符数」而不是「token 数」？
-#   精确算 token 需要额外的分词库，而我们只需要一个「够用就行」的粗略阈值；
-#   中文大约 1 字 ≈ 1 token，英文 1 token ≈ 4 字符，这个数设得保守一点就够。
-MAX_CONTEXT_CHARS = 20000
+# 对话历史的预算。超过就会触发压缩（见 context.py）。
+#
+# 这里用 **token** 而不是字符，因为字符数对中文是系统性失真的：
+#   英文大约 4 字符 = 1 token，中文常常 1 字就要 1 token。
+#   按字符算，中文任务会过早压缩（白白丢信息），英文任务会过晚压缩（请求超限报错）。
+#
+# 精确算 token 需要分词库，而我们要保持零第三方依赖 —— 所以用 tokens.py 里的
+# TokenEstimator：起点是个粗略猜测，跑过两轮用真实 usage 自动校准。
+# 预算留足余量（deepseek-chat 标称 64K 上下文，这里只给到 24K）：
+# 压缩的代价是丢一点信息，超上限的代价是整个请求失败，不划算。
+MAX_CONTEXT_TOKENS = 24000
+# 校准前的初始猜测：约 2.5 个字符算 1 个 token（中英混合的折中）。
+CHARS_PER_TOKEN_HINT = 2.5
 
 # 第一层：绝对黑名单。命中直接拒绝，连问都不问。
 #

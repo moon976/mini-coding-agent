@@ -15,11 +15,15 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from mini_agent.context import MAX_COMPACT_ROUNDS, Conversation  # noqa: E402
+from mini_agent.tokens import TokenEstimator  # noqa: E402
 
 
 class ConversationTest(unittest.TestCase):
     def _conv(self, budget: int = 20000) -> Conversation:
-        return Conversation("员工守则", budget_chars=budget)
+        # 预算单位是 token。测试里把单价钉死成 1 字符 = 1 token，
+        # 这样「多少字符 = 多少 token」，断言写起来直观，也不受校准影响。
+        return Conversation("员工守则", budget_tokens=budget,
+                            estimator=TokenEstimator(chars_per_token=1.0))
 
     def _turn(self, conv: Conversation, call_id: str, content: str) -> None:
         """往历史里追加一组「模型说话 + 工具结果」。"""
