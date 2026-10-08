@@ -106,7 +106,7 @@ python main.py --yes "同样的任务"                      # 自动放行，但
 ## 测试
 
 ```bash
-python -m unittest discover -s tests -v     # 35 个用例，不需要 API key
+python -m unittest discover -s tests -v     # 37 个用例，不需要 API key
 ```
 
 用假模型把「模型」这个变量钉死，单独验证循环本身，覆盖四个文件：
@@ -146,6 +146,10 @@ python main.py --report                    # 读所有记录，打印统计
 > 注意：假模型任务的 token 全是 0，统计里的 token 一栏只算真实模型任务。
 > 想攒出能写进简历的数字，用真模型跑，并且**别把假模型的演示记录混在里面**
 > （`traces/` 不进仓库，删掉重跑即可）。
+
+**跑哪批任务？** 见 `BENCHMARK.md`：10 个真实任务（每个对应一种能力，附预期步数与通过标准）
++ 2 个安全演示（该被拒绝的那种，不计入统计）。照着发一遍，就能拿到成功率、
+平均步数、平均 token 三个数字。
 
 ## 还没做的
 
